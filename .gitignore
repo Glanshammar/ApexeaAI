@@ -66,7 +66,7 @@ env/
 venv/
 ENV/
 /AutoBrowser/xpaths.json
-/AutoBrowser/users.env
+/AutoBrowser/*.env
 
 # IDE-specific files
 # PyCharm
@@ -110,3 +110,7 @@ Package Control.system-ca-bundle
 GitHub.sublime-settings
 
 .history
+
+# Tests
+/Tests/*.py
+!/Tests/example.py
