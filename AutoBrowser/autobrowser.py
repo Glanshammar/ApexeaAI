@@ -22,6 +22,7 @@ class AutoBrowser():
             raise ValueError('Browser type not set. Please specify the browser type.')
         self.xpaths = self.LoadXPaths()
         self.handles = self.driver.window_handles
+        self.wait = WebDriverWait(self.driver, 20)
 
         for key in self.xpaths:
             setattr(self, key, self.xpaths[key])
@@ -60,24 +61,46 @@ class AutoBrowser():
         self.driver.get(url)
 
     def FindElementXPATH(self, xpath):
-        return WebDriverWait(self.driver, 20).until(
+        return self.wait.until(
             EC.presence_of_element_located((By.XPATH, xpath))
         )
 
+    def FindElementsByID(self, partial_id:str):
+        elements = self.wait.until(
+            EC.presence_of_all_elements_located(
+                (By.CSS_SELECTOR, f"[id^='{partial_id}']")
+            )
+        )
+        return elements
+    
+    def FindElementsByClass(self, class_name:str):
+        elements = self.driver.find_elements(By.XPATH, f"//div[contains(@class, '{class_name}')]")
+        return elements
+
+    
+    def FindElementsByText(self, text:str, partial:bool = False):
+        if partial == True:
+            elements = self.driver.find_elements(By.XPATH, f"//*[contains(text(), '{text}')]")
+            return elements
+        else:
+            elements = self.driver.find_elements(By.XPATH, f"//*[text()='{text}']")
+            return elements
+        
+
     def ClickElement(self, xpath):
-        clickable_element = WebDriverWait(self.driver, 20).until(
+        clickable_element = self.wait.until(
             EC.element_to_be_clickable((By.XPATH, xpath))
         )
         clickable_element.click()
     
     def TextInput(self, xpath, text):
-        text_element = WebDriverWait(self.driver, 20).until(
+        text_element = self.wait.until(
             EC.presence_of_element_located((By.XPATH, xpath))
         )
         text_element.send_keys(text)
 
     def GetElementText(self, xpath):
-        element = WebDriverWait(self.driver, 20).until(
+        element = self.wait.until(
             EC.presence_of_element_located((By.XPATH, xpath))
         )
         return element.text

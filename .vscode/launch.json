@@ -7,6 +7,13 @@
             "request": "launch",
             "program": "${workspaceFolder}/Tests/example.py",
             "console": "integratedTerminal"
+        },
+        {
+            "name": "Test: Ted",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/Tests/ted.py",
+            "console": "integratedTerminal"
         }
     ]
 }

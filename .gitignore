@@ -65,8 +65,6 @@ __pypackages__/
 env/
 venv/
 ENV/
-/AutoBrowser/xpaths.json
-/AutoBrowser/*.env
 
 # IDE-specific files
 # PyCharm
