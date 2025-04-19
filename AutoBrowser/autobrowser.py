@@ -4,6 +4,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from time import sleep
 import json
+import re
 import os
 import sys
 from enum import IntEnum
@@ -85,7 +86,12 @@ class AutoBrowser():
         else:
             elements = self.driver.find_elements(By.XPATH, f"//*[text()='{text}']")
             return elements
-        
+    
+    def FindHrefs(self):
+        hrefs = []
+        links = self.driver.find_elements(By.TAG_NAME, "a")
+        hrefs.extend([link.get_attribute("href") for link in links])
+        return hrefs
 
     def ClickElement(self, xpath):
         clickable_element = self.wait.until(
@@ -107,3 +113,13 @@ class AutoBrowser():
 
     def CloseBrowser(self):
         self.driver.quit()
+
+    @staticmethod
+    def IsUrlValid(url):
+        pattern = re.compile(r'https?://\S+')
+        return bool(pattern.match(url))
+
+    @staticmethod
+    def FilterLinks(keywords:list, links:list):
+        filtered_links = [url for url in links if any(kw in url for kw in keywords)]
+        return filtered_links
