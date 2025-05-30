@@ -2,6 +2,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.action_chains import ActionChains
 from time import sleep
 import json
 import re
@@ -27,6 +28,9 @@ class AutoBrowser():
 
         for key in self.xpaths:
             setattr(self, key, self.xpaths[key])
+
+    def SetWait(self, seconds:int):
+        self.wait = WebDriverWait(self.driver, seconds)
 
     def Script(self, js_code):
         self.driver.execute_script(js_code)
@@ -66,13 +70,21 @@ class AutoBrowser():
             EC.presence_of_element_located((By.XPATH, xpath))
         )
 
-    def FindElementsByID(self, partial_id:str):
-        elements = self.wait.until(
-            EC.presence_of_all_elements_located(
-                (By.CSS_SELECTOR, f"[id^='{partial_id}']")
+    def FindElementByID(self, id:str, all_elements:bool = False):
+        if all_elements:
+            elements = self.wait.until(
+                EC.presence_of_all_elements_located(
+                    (By.CSS_SELECTOR, f"[id^='{id}']")
+                )
             )
-        )
-        return elements
+            return elements
+        else:
+            element = self.wait.until(
+                EC.presence_of_element_located(
+                    (By.CSS_SELECTOR, f"[id^='{id}']")
+                )
+            )
+            return element
     
     def FindElementsByClass(self, class_name:str):
         elements = self.driver.find_elements(By.XPATH, f"//div[contains(@class, '{class_name}')]")
@@ -98,6 +110,7 @@ class AutoBrowser():
             EC.element_to_be_clickable((By.XPATH, xpath))
         )
         clickable_element.click()
+
     
     def TextInput(self, xpath, text):
         text_element = self.wait.until(
