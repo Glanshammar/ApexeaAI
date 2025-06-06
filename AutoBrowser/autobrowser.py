@@ -1,53 +1,70 @@
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.action_chains import ActionChains
-from time import sleep
+from playwright.sync_api import sync_playwright, Page, Browser, BrowserContext
+from typing import Dict, List, Optional, Union, Any
+from enum import IntEnum
 import json
 import re
 import os
 import sys
-from enum import IntEnum
+from time import sleep
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
 class BrowserType(IntEnum):
-    Chrome = 1
+    Chromium = 1
     Firefox = 2
+    Webkit = 3
 
-
-class AutoBrowser():
-    def __init__(self, type: BrowserType):
-        self.driver = webdriver.Chrome() if type == BrowserType.Chrome else webdriver.Firefox if BrowserType.Firefox else None
-        if self.driver == None:
-            raise ValueError('Browser type not set. Please specify the browser type.')
+class AutoBrowser:
+    def __init__(self, type: BrowserType, headless: bool = False):
+        self.playwright = sync_playwright().start()
+        
+        # Initialize browser based on type
+        if type == BrowserType.Chromium:
+            self.browser = self.playwright.chromium.launch(headless=headless)
+        elif type == BrowserType.Firefox:
+            self.browser = self.playwright.firefox.launch(headless=headless)
+        elif type == BrowserType.Webkit:
+            self.browser = self.playwright.webkit.launch(headless=headless)
+        else:
+            raise ValueError('Invalid browser type. Please specify a valid browser type.')
+        
+        # Create a new context and page
+        self.context = self.browser.new_context()
+        self.page = self.context.new_page()
+        
+        # Load XPaths
         self.xpaths = self.LoadXPaths()
-        self.handles = self.driver.window_handles
-        self.wait = WebDriverWait(self.driver, 20)
-
+        
+        # Set default timeout (20 seconds)
+        self.page.set_default_timeout(20000)
+        
+        # Expose XPath elements as attributes
         for key in self.xpaths:
             setattr(self, key, self.xpaths[key])
-
-    def SetWait(self, seconds:int):
-        self.wait = WebDriverWait(self.driver, seconds)
-
-    def Script(self, js_code):
-        self.driver.execute_script(js_code)
-
-    def NewTab(self, url=None):
-        if url == None:
-            url = ''
-        self.driver.execute_script(f"window.open('{url}');")
-        self.handles = self.driver.window_handles
-        self.driver.switch_to.window(self.handles[-1])
     
-    def SwitchTab(self):
-        self.driver.switch_to.window(self.handles[-1])
-
-    def LoadXPaths(self):
+    def SetTimeout(self, seconds: int) -> None:
+        self.page.set_default_timeout(seconds * 1000)  # Convert to milliseconds
+    
+    def Script(self, js_code: str) -> Any:
+        return self.page.evaluate(js_code)
+    
+    def NewTab(self, url: Optional[str] = None) -> Page:
+        new_page = self.context.new_page()
+        if url:
+            new_page.goto(url)
+        self.page = new_page
+        return new_page
+    
+    def SwitchTab(self, index: int = -1) -> None:
+        pages = self.context.pages
+        if 0 <= index < len(pages):
+            self.page = pages[index]
+        else:
+            raise IndexError(f"Tab index {index} is out of range. Available tabs: {len(pages)}")
+    
+    def LoadXPaths(self) -> Dict[str, str]:
         xpaths_path = os.path.join(current_dir, 'xpaths.json')
-
+        
         try:
             with open(xpaths_path, 'r') as file:
                 xpaths = json.load(file)
@@ -56,83 +73,86 @@ class AutoBrowser():
         except FileNotFoundError:
             print(f"xpaths.json file not found at path: {xpaths_path}")
             return {}
-
-    def XPath(self, key):
+    
+    def XPath(self, key: str) -> Optional[str]:
         return self.xpaths.get(key)
-
-    def OpenWebsite(self, url):
-        if not(url.startswith('http://') or url.startswith('https://')):
+    
+    def OpenWebsite(self, url: str) -> None:
+        if not (url.startswith('http://') or url.startswith('https://')):
             url = f'https://{url}'
-        self.driver.get(url)
-
-    def FindElementXPATH(self, xpath):
-        return self.wait.until(
-            EC.presence_of_element_located((By.XPATH, xpath))
-        )
-
-    def FindElementByID(self, id:str, all_elements:bool = False):
+        self.page.goto(url)
+    
+    def FindElementXPATH(self, xpath: str):
+        return self.page.wait_for_selector(xpath)
+    
+    def FindElementByID(self, id_prefix: str, all_elements: bool = False):
+        selector = f"[id^='{id_prefix}']"
         if all_elements:
-            elements = self.wait.until(
-                EC.presence_of_all_elements_located(
-                    (By.CSS_SELECTOR, f"[id^='{id}']")
-                )
-            )
-            return elements
+            return self.page.query_selector_all(selector)
         else:
-            element = self.wait.until(
-                EC.presence_of_element_located(
-                    (By.CSS_SELECTOR, f"[id^='{id}']")
-                )
-            )
-            return element
+            return self.page.wait_for_selector(selector)
     
-    def FindElementsByClass(self, class_name:str):
-        elements = self.driver.find_elements(By.XPATH, f"//div[contains(@class, '{class_name}')]")
-        return elements
-
+    def FindElementsByClass(self, class_name: str):
+        return self.page.query_selector_all(f"div[class*='{class_name}']")
     
-    def FindElementsByText(self, text:str, partial:bool = False):
-        if partial == True:
-            elements = self.driver.find_elements(By.XPATH, f"//*[contains(text(), '{text}')]")
-            return elements
+    def FindElementsByText(self, text: str, partial: bool = False):
+        if partial:
+            return self.page.query_selector_all(f"//*[contains(text(), '{text}')]")
         else:
-            elements = self.driver.find_elements(By.XPATH, f"//*[text()='{text}']")
-            return elements
+            return self.page.query_selector_all(f"//*[text()='{text}']")
     
-    def FindHrefs(self):
-        hrefs = []
-        links = self.driver.find_elements(By.TAG_NAME, "a")
-        hrefs.extend([link.get_attribute("href") for link in links])
-        return hrefs
-
-    def ClickElement(self, xpath):
-        clickable_element = self.wait.until(
-            EC.element_to_be_clickable((By.XPATH, xpath))
-        )
-        clickable_element.click()
-
+    def FindHrefs(self) -> List[str]:
+        return self.page.evaluate("""() => {
+            const links = Array.from(document.querySelectorAll('a'));
+            return links.map(link => link.href).filter(href => href);
+        }""")
     
-    def TextInput(self, xpath, text):
-        text_element = self.wait.until(
-            EC.presence_of_element_located((By.XPATH, xpath))
-        )
-        text_element.send_keys(text)
-
-    def GetElementText(self, xpath):
-        element = self.wait.until(
-            EC.presence_of_element_located((By.XPATH, xpath))
-        )
-        return element.text
-
-    def CloseBrowser(self):
-        self.driver.quit()
-
+    def ClickElement(self, xpath: str) -> None:
+        self.page.click(xpath)
+    
+    def TextInput(self, xpath: str, text: str) -> None:
+        self.page.fill(xpath, text)
+    
+    def GetElementText(self, xpath: str) -> str:
+        element = self.page.wait_for_selector(xpath)
+        return element.text_content() if element else ""
+    
+    def TakeScreenshot(self, path: str) -> None:
+        self.page.screenshot(path=path)
+    
+    def WaitForNavigation(self) -> None:
+        self.page.wait_for_load_state("networkidle")
+    
+    def WaitForSelector(self, selector: str, timeout: Optional[int] = None) -> None:
+        if timeout:
+            self.page.wait_for_selector(selector, timeout=timeout * 1000)
+        else:
+            self.page.wait_for_selector(selector)
+    
+    def GetPageTitle(self) -> str:
+        return self.page.title()
+    
+    def GetPageUrl(self) -> str:
+        return self.page.url
+    
+    def GoBack(self) -> None:
+        self.page.go_back()
+    
+    def GoForward(self) -> None:
+        self.page.go_forward()
+    
+    def Reload(self) -> None:
+        self.page.reload()
+    
+    def CloseBrowser(self) -> None:
+        self.browser.close()
+        self.playwright.stop()
+    
     @staticmethod
-    def IsUrlValid(url):
+    def IsUrlValid(url: str) -> bool:
         pattern = re.compile(r'https?://\S+')
         return bool(pattern.match(url))
-
+    
     @staticmethod
-    def FilterLinks(keywords:list, links:list):
-        filtered_links = [url for url in links if any(kw in url for kw in keywords)]
-        return filtered_links
+    def FilterLinks(keywords: List[str], links: List[str]) -> List[str]:
+        return [url for url in links if any(kw in url for kw in keywords)]
