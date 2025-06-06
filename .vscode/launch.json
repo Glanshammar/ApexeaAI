@@ -1,18 +1,13 @@
 {
-    "version": "0.1.0",
+    "version": "0.2.0",
     "configurations": [
         {
-            "name": "Test: Example",
+            "name": "Django: Run Server",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/Tests/example.py",
-            "console": "integratedTerminal"
-        },
-        {
-            "name": "Test: Ted",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/Tests/ted.py",
+            "program": "${workspaceFolder}/manage.py",
+            "args": ["runserver", "8000"],
+            "django": true,
             "console": "integratedTerminal"
         }
     ]

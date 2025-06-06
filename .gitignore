@@ -113,4 +113,3 @@ GitHub.sublime-settings
 /Tests/*.py
 /Tests/*.txt
 !/Tests/example.py
-AutoBrowser/__pycache__/autobrowser.cpython-313.pyc
