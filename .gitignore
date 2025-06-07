@@ -109,7 +109,8 @@ GitHub.sublime-settings
 
 .history
 
-# Tests
+# Other
 /Tests/*.py
 /Tests/*.txt
 !/Tests/example.py
+firebase.json

@@ -2,13 +2,25 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Django: Run Server",
+            "name": "API",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/manage.py",
-            "args": ["runserver", "8000"],
-            "django": true,
+            "program": "${workspaceFolder}/Backend/api.py",
             "console": "integratedTerminal"
+        },
+        {
+            "name": "Server",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/Backend/server.py",
+            "console": "integratedTerminal"
+        }
+    ],
+    "compounds": [
+        {
+            "name": "Server+API",
+            "configurations": ["Server", "API"],
+            "stopAll": true
         }
     ]
 }
