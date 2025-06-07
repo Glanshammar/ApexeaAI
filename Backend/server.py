@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 
 
 load_dotenv()
-cred_file = os.path.join(root_dir, 'credentials.json')
+cred_file = os.path.join(root_dir, 'firebase.json')
 master_agent = None
 db = Database(db_type='firestore', config=cred_file)
 
@@ -255,13 +255,16 @@ async def Main():
     try:
         while True:
             try:
+                # Wait for a message
                 message = await server.recv_json()
                 command = message.get('command')
                 params = message.get('params', {})
 
                 if command == 'exit':
+                    await server.send_json({'status': 'shutdown'})
                     break
 
+                # Process the command
                 response = await ProcessCommand(command, params)
                 if isinstance(response, tuple) and len(response) == 2:
                     response_data = {
@@ -274,10 +277,24 @@ async def Main():
                         'status_code': 200
                     }
                 await server.send_json(response_data)
+            except zmq.error.Again:
+                # This is a non-blocking recv timeout - just continue the loop
+                # Don't try to send a response as we haven't received a message
+                print("ZMQ receive timeout, continuing...")
+                await asyncio.sleep(0.1)
+                continue
             except (json.JSONDecodeError, KeyError) as e:
-                await server.send_json({'error': f'Invalid request: {str(e)}'})
+                # Only send an error response if we successfully received a message
+                try:
+                    await server.send_json({'error': f'Invalid request: {str(e)}'})
+                except zmq.error.ZMQError:
+                    print(f"Error sending response: {str(e)}")
             except Exception as e:
-                await server.send_json({'error': f'Server error: {str(e)}'})
+                # Only send an error response if we successfully received a message
+                try:
+                    await server.send_json({'error': f'Server error: {str(e)}'})
+                except zmq.error.ZMQError:
+                    print(f"Error in request processing: {str(e)}")
     except KeyboardInterrupt:
         print("\nShutting down server...")
     finally:

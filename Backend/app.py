@@ -13,8 +13,6 @@ root_dir = os.path.dirname(current_dir)
 sys.path.insert(0, root_dir)
 sys.path.insert(0, current_dir)
 
-import firebase_admin
-from firebase_admin import credentials, firestore
 from flask import Flask, jsonify
 from flask_login import LoginManager, UserMixin
 from typing import Optional
@@ -23,6 +21,8 @@ from datetime import datetime, timedelta
 from flask import session
 import time
 from datetime import timedelta
+from Backend.database import Database
+from flask import current_app
 
 """
 Configuration loading order for CreateApp:
@@ -42,12 +42,6 @@ Example config.yaml:
 
 Note: SECRET_KEY must NOT be set in config.yaml. It will always be randomly generated at runtime.
 """
-
-def InitDB(cred_path):
-    if not firebase_admin._apps:
-        cred = credentials.Certificate(cred_path)
-        firebase_admin.initialize_app(cred)
-    return firestore.client()
 
 def CreateApp(config=None):
     app = Flask(__name__)
@@ -77,7 +71,9 @@ def CreateApp(config=None):
     app.config.setdefault("SESSION_COOKIE_SECURE", True)
     app.config.setdefault("SESSION_COOKIE_SAMESITE", "Strict")
 
-    app.db = InitDB(f'{os.path.dirname(os.path.dirname(__file__))}/credentials.json')
+    # Initialize database
+    cred_path = f'{os.path.dirname(os.path.dirname(__file__))}/firebase.json'
+    app.db = Database(db_type='firestore', config=cred_path)
 
     # --- Flask-Login Setup ---
     login_manager = LoginManager()
@@ -105,14 +101,11 @@ def CreateApp(config=None):
             return str(self.id)
 
         @classmethod
-        def get(cls, user_id: str) -> Optional["User"]:
-            """Load user from Firestore by user_id."""
-            from flask import current_app
-            user_doc = current_app.db.collection(USERS).document(user_id).get()
-            if user_doc.exists:
-                data = user_doc.to_dict()
+        def get(cls, user_id: str) -> Optional["User"]:           
+            data = current_app.db.get_by_id(USERS, user_id)
+            if data:
                 return cls(
-                    user_id=user_doc.id,
+                    user_id=user_id,
                     username=data.get('username'),
                     email=data.get('email'),
                     validated=data.get('validated', False),
@@ -122,23 +115,17 @@ def CreateApp(config=None):
 
         @classmethod
         def authenticate(cls, username: str, password: str) -> Optional["User"]:
-            """Authenticate user by username and password."""
-            from flask import current_app
-            from google.cloud.firestore_v1.base_query import FieldFilter
-            import bcrypt
-            users_ref = current_app.db.collection(USERS)
-            user_docs = users_ref.where(filter=FieldFilter('username', '==', username)).limit(1).stream()
-            user_doc = next(user_docs, None)
-            if user_doc:
-                user_data = user_doc.to_dict()
-                if bcrypt.checkpw(password.encode(), user_data.get('password', '').encode()):
-                    return cls(
-                        user_id=user_doc.id,
-                        username=user_data.get('username'),
-                        email=user_data.get('email'),
-                        validated=user_data.get('validated', False),
-                        role=user_data.get('role', 'User')
-                    )
+            result = current_app.db.authenticate_user(USERS, username, password)
+            
+            if result:
+                user_id, user_data = result
+                return cls(
+                    user_id=user_id,
+                    username=user_data.get('username'),
+                    email=user_data.get('email'),
+                    validated=user_data.get('validated', False),
+                    role=user_data.get('role', 'User')
+                )
             return None
 
     @login_manager.user_loader

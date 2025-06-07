@@ -8,6 +8,7 @@ sys.path.append(parent_dir)
 from datetime import datetime, timedelta
 import logging
 import asyncio
+import time
 from time import sleep
 from functools import wraps
 from typing import Tuple, Dict, Any, Optional
@@ -15,21 +16,32 @@ from contextlib import asynccontextmanager
 from flask import Flask, request, jsonify, current_app, session, abort, make_response
 from flask_cors import CORS
 from flask_login import login_user, logout_user, login_required, current_user, LoginManager, UserMixin
-from google.cloud.firestore_v1.base_query import FieldFilter
 import zmq
 import zmq.asyncio
 import bcrypt
 import re
 from httpcodes import *
 from Agents import AgentManager, Agent
-from .app import *
+from Data import *
+from Backend.app import *
 from dotenv import load_dotenv
 from Logger import LoggerManager
 import threading
-import time
 import secrets
 import inspect
 import requests
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
+from email.utils import formatdate
+from email.header import Header
+from email.mime.base import MIMEBase
+from email.mime.image import MIMEImage
+import userpaths
+
+load_dotenv()
+documents_folder = userpaths.get_my_documents()
 
 
 # Collection name constants
@@ -271,6 +283,24 @@ def BlockAgents(func):
         return async_wrapper
     else:
         return sync_wrapper
+
+
+async def SendValidationEmail(email: str, validation_code: str) -> Tuple[Dict[str, Any], int]:
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = os.getenv('EMAIL_SENDER')
+        msg['To'] = email
+        msg['Subject'] = "Apexea AI - Account Validation"
+        msg.attach(MIMEText(f"Please validate your account with the code: {validation_code}"))
+
+        with smtplib.SMTP(os.getenv('EMAIL_SERVER'), os.getenv('EMAIL_PORT')) as server:
+            server.starttls()
+            server.login(os.getenv('EMAIL_SENDER'), os.getenv('EMAIL_PASSWORD'))
+            server.send_message(msg)
+        return http_200("Validation email sent successfully.")
+    except Exception as e:
+        logger.error(f"Failed to send validation email: {str(e)}", extra={'error': str(e)})
+        return http_500(f"Failed to send validation email: {str(e)}")
 # ------------------------------------------------------------------------------------------------------------- #
 # ---------------------------------------------- Route Functions ---------------------------------------------- #
 @app.route('/api/status/server', methods=['GET'])
@@ -292,39 +322,125 @@ async def Register() -> Tuple[Dict[str, Any], int]:
     username = data.get("username")
     email = data.get("email")
     password = data.get("password")
-    role = data.get("role", "User")
 
-    # Basic validation
     if not username or not email or not password:
         return http_400("Username, email, and password are required.")
     
     if not ValidatePassword(password):
         return http_400("Password must be at least 8 characters and include uppercase, lowercase, number, and symbol.")
 
-    # Check if user already exists
-    users_ref = current_app.db.collection(USERS)
-    existing_users = list(users_ref.where(filter=FieldFilter('username', '==', username)).limit(1).stream())
-    if existing_users:
-        return http_409("Username already exists.")
+    # Check if user with same username or email already exists
+    try:
+        # First, use the query method (more database-agnostic)
+        existing_users_by_username = current_app.db.query(USERS, {'username': username}, limit=1)
+        existing_users_by_email = current_app.db.query(USERS, {'email': email}, limit=1)
+        
+        if existing_users_by_username:
+            return http_409(f"Username '{username}' is already taken. Please choose another one.")
+            
+        if existing_users_by_email:
+            return http_409(f"Email '{email}' is already registered. Please use a different email.")
+            
+        # If the query method doesn't find anything but we still need to be sure,
+        # try getting all users and checking manually (fallback)
+        if not existing_users_by_username and not existing_users_by_email:
+            all_users = current_app.db.get_all(USERS)
+            for _, user_data in all_users:
+                if user_data.get('username') == username:
+                    return http_409(f"Username '{username}' is already taken. Please choose another one.")
+                if user_data.get('email') == email:
+                    return http_409(f"Email '{email}' is already registered. Please use a different email.")
+    except Exception as e:
+        logger.error(f"Error checking for existing users: {str(e)}", extra={'error': str(e)})
+        return http_500(f"Registration failed: {str(e)}")
 
-    # Hash the password
-    hashed_pw = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    # Proceed with user creation
+    try:
+        hashed_pw = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+        validation_code = secrets.token_urlsafe(16)
 
-    # Generate a secure validation code
-    validation_code = secrets.token_urlsafe(16)
+        user_data = {
+            "username": username,
+            "email": email,
+            "password": hashed_pw,
+            "validated": False,
+            "validation_code": validation_code,
+        }
+        
+        # Create the user document
+        result = await ServerRequest(
+            command='create',
+            params={
+                'collection_name': USERS,
+                'document_data': user_data
+            }
+        )
+        
+        if isinstance(result, tuple) and len(result) >= 2 and result[1] >= 400:
+            return result
+            
+        logger.info(f"User registered: {username}")
+        
+        try:
+            await SendValidationEmail(email, validation_code)
+            return http_201("User registered successfully. Please validate your account with the code sent to your email.")
+        except Exception as email_error:
+            logger.warning(f"User registered but email failed to send: {str(email_error)}")
+            return http_201("User registered successfully but validation email failed to send.")
+    except Exception as e:
+        logger.error(f"User registration failed: {str(e)}", extra={'error': str(e)})
+        return http_500(f"Registration failed: {str(e)}")
 
-    # Store user in Firestore with validated=False and validation_code
-    user_data = {
-        "username": username,
-        "email": email,
-        "password": hashed_pw,
-        "validated": False,
-        "validation_code": validation_code,
-        "role": role
-    }
-    user_ref = users_ref.add(user_data)
-    logger.info(f"User registered: {username}", extra={'user_id': user_ref[1].id})
-    return jsonify({"message": "User registered successfully. Please validate your account.", "validation_code": validation_code}), 201
+
+@app.route('/api/user/validate', methods=['POST'])
+@BlockAgents
+async def ValidateUser() -> Tuple[Dict[str, Any], int]:
+    data = request.get_json()
+    email = data.get("email")
+    code = data.get("validation_code")
+
+    if not code or not email:
+        return http_400("Invalid input: Email and validation code are required.")
+
+    # First try the query method
+    try:
+        users = current_app.db.query(USERS, {'email': email}, limit=1)
+        
+        if not users:
+            return http_404("User not found.")
+        
+        user_id, user_data = users[0]
+        
+        if user_data.get("validated", False):
+            return http_400("User already validated.")
+            
+        if user_data.get("validation_code") != code:
+            return http_401("Invalid validation code.")
+        
+        updated_data = {
+            "validated": True,
+            "validation_code": None
+        }
+        
+        # Update the user document
+        result = await ServerRequest(
+            command='update',
+            params={
+                'collection_name': USERS,
+                'document_id': user_id,
+                'document_data': updated_data,
+                'merge': True
+            }
+        )
+        
+        if isinstance(result, tuple) and len(result) >= 2 and result[1] >= 400:
+            return result
+            
+        logger.info(f"User validated: {user_id}", extra={'user_id': user_id})
+        return http_200("User validated successfully.")
+    except Exception as e:
+        logger.error(f"User validation failed: {str(e)}", extra={'error': str(e)})
+        return http_500(f"Validation failed: {str(e)}")
 
 
 @app.route('/api/user/login', methods=['POST'])
@@ -337,7 +453,6 @@ async def Login() -> Tuple[Dict[str, Any], int]:
     if not username or not password:
         return http_401("Username and password required.")
 
-    # Use the User class's authenticate method
     user_obj = app.User.authenticate(username, password)
     if not user_obj:
         return http_401("Invalid credentials.")
@@ -347,28 +462,32 @@ async def Login() -> Tuple[Dict[str, Any], int]:
 
     login_user(user_obj)
     logger.info(f"User logged in: {username}", extra={'user_id': user_obj.id})
-    return jsonify({"message": "Login successful"}), 200
+    return http_200("Login successful")
 
 
 @app.route('/api/user/logout', methods=['POST'])
 @BlockAgents
 @login_required
 async def Logout() -> Tuple[Dict[str, Any], int]:
-    logout_user()
-    return jsonify({"message": "Successfully logged out"}), 200
+    try:
+        logout_user()
+        return http_200("Successfully logged out")
+    except Exception as e:
+        logger.error(f"Logout failed: {str(e)}", extra={'error': str(e)})
+        return http_500(f"Logout failed: {str(e)}")
 
 
 @app.route('/api/user/profile', methods=['GET'])
 @BlockAgents
 @login_required
-async def GetProfile():
+async def FetchProfile():
     try:
         current_user_id = current_user.get_id()
-        logger.info(f"Getting profile for user: {current_user_id}", extra={'user_id': current_user_id})
+        logger.info(f"Fetching profile for user: {current_user_id}", extra={'user_id': current_user_id})
         return await DatabaseRequest(collection_name=USERS, data=None, doc_id=current_user_id)
     except Exception as e:
-        logger.error(f"Get profile failed: {str(e)}", extra={'error': str(e)})
-        return jsonify({"error": str(e)}), 500
+        logger.error(f"Fetching profile failed: {str(e)}", extra={'error': str(e)})
+        return http_500(f"Fetching profile failed: {str(e)}")
 
 
 @app.route('/api/user/update', methods=['PUT'])
@@ -387,7 +506,7 @@ async def UpdateProfile():
         return await DatabaseRequest(collection_name=USERS, data=data, doc_id=current_user_id)
     except Exception as e:
         logger.error(f"Update profile failed: {str(e)}", extra={'error': str(e)})
-        return jsonify({"error": str(e)}), 500
+        return http_500(f"Update profile failed: {str(e)}")
 
 
 @app.route('/api/user/delete', methods=['DELETE'])
@@ -410,39 +529,10 @@ async def DeleteOtherUser() -> Tuple[Dict[str, Any], int]:
     return await DatabaseRequest(collection_name=USERS, data=None, doc_id=user_id)
 
 
-@app.route('/api/user/validate', methods=['POST'])
-@BlockAgents
-async def ValidateUser() -> Tuple[Dict[str, Any], int]:
-    data = request.get_json()
-    email = data.get("email")
-    code = data.get("validation_code")
-
-    if not code or not email:
-        return http_400("Invalid input: Email and validation code are required.")
-
-    users_ref = current_app.db.collection(USERS)
-    query = users_ref.where(filter=FieldFilter('email', '==', email)).limit(1)
-    user_docs = list(query.stream())
-    if not user_docs:
-        return http_404("User not found.")
-    user_doc = user_docs[0]
-    user_data = user_doc.to_dict()
-    if user_data.get("validated", False):
-        return http_400("User already validated.")
-    if user_data.get("validation_code") != code:
-        return http_401("Invalid validation code.")
-    # Set validated to True and remove validation_code
-    user_doc.reference.update({"validated": True, "validation_code": firestore.DELETE_FIELD})
-    logger.info(f"User validated: {user_doc.id}", extra={'user_id': user_doc.id})
-    return jsonify({"msg": "User validated successfully."}), 200
-
-
 @app.route('/api/user/get_role', methods=['GET'])
 @login_required
 async def GetRoles():
-    return jsonify({"role": current_user.role}), 200
-
-
+    return http_200(current_user.role)
 # ------------------------------------------------------------------------------------------------------------- #
 # --------------------------------------------- Agent Management ---------------------------------------------- #
 @app.route('/api/agents', methods=['POST', 'GET', 'DELETE'])

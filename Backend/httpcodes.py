@@ -15,7 +15,11 @@ def http_103(message="Early Hints"):
 def http_200(message="OK"):
     return jsonify({"message": message}), 200
 
-def http_201(message="Created"):
+def http_201(message="Created", data=None):
+    if data:
+        response = {"message": message}
+        response.update(data if isinstance(data, dict) else {"data": data})
+        return jsonify(response), 201
     return jsonify({"message": message}), 201
 
 def http_202(message="Accepted"):
