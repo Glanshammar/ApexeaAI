@@ -114,3 +114,4 @@ GitHub.sublime-settings
 /Tests/*.txt
 !/Tests/example.py
 firebase.json
+Scripts/
