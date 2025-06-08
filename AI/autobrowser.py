@@ -63,15 +63,15 @@ class AutoBrowser:
             raise IndexError(f"Tab index {index} is out of range. Available tabs: {len(pages)}")
     
     def LoadXPaths(self) -> Dict[str, str]:
-        xpaths_path = os.path.join(current_dir, 'xpaths.json')
+        xpaths_file = os.path.join(current_dir, 'xpaths.json')
         
         try:
-            with open(xpaths_path, 'r') as file:
+            with open(xpaths_file, 'r') as file:
                 xpaths = json.load(file)
                 print("XPaths loaded successfully.")
                 return xpaths
         except FileNotFoundError:
-            print(f"xpaths.json file not found at path: {xpaths_path}")
+            print(f"xpaths.json file not found at path: {xpaths_file}")
             return {}
     
     def XPath(self, key: str) -> Optional[str]:
