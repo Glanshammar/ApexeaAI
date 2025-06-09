@@ -10,7 +10,7 @@ from time import sleep
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
 class BrowserType(IntEnum):
-    Chromium = 1
+    Chrome = 1
     Firefox = 2
     Webkit = 3
 
@@ -19,7 +19,7 @@ class AutoBrowser:
         self.playwright = sync_playwright().start()
         
         # Initialize browser based on type
-        if type == BrowserType.Chromium:
+        if type == BrowserType.Chrome:
             self.browser = self.playwright.chromium.launch(headless=headless)
         elif type == BrowserType.Firefox:
             self.browser = self.playwright.firefox.launch(headless=headless)
