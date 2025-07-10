@@ -17,16 +17,37 @@ from typing import List, Dict, Optional
 temp_folder = os.path.join(current_dir, 'temp')
 os.makedirs(temp_folder, exist_ok=True)
 
+deepseek_chat_model = "deepseek/deepseek-chat-v3-0324:free"
+deepseek_r1_model = "deepseek/deepseek-r1-0528:free"
 
-def PromptAI(prompt: str) -> Optional[str]:
-    """Send a prompt to the AI and get a response."""
+openrouter_api_keys = [
+    os.getenv("OPENROUTER_KEY1"),
+    os.getenv("OPENROUTER_KEY2"),
+]
+
+api_calls = 0
+max_calls_per_key = 50
+max_total_calls = len(openrouter_api_keys) * max_calls_per_key
+
+def PromptAI(model: str, prompt: str) -> Optional[str] | bool:
     try:
+        global api_calls
+        if api_calls >= max_total_calls:
+            print("All API keys exhausted. Stopping further calls.")
+            return False  # Signal to stop
+        api_calls += 1
+        key_index = (api_calls - 1) // max_calls_per_key % len(openrouter_api_keys)
+        current_key = openrouter_api_keys[key_index]
+        if api_calls % max_calls_per_key == 1 and api_calls > 1:
+            print("Warning: API calls limit reached, switching to next key")
+
+
         client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
-            api_key=os.getenv("AI_API_KEY")
+            api_key=current_key
         )
         response = client.chat.completions.create(
-            model="microsoft/mai-ds-r1:free",
+            model=model,
             messages=[{"role": "user", "content": prompt}]
         )
         if not response or not response.choices:
@@ -49,7 +70,6 @@ def GetLinksFromResponse(response_text: str) -> List[str]:
 def DownloadFile(browser: AutoBrowser, url: str, save_dir: str, filename: str) -> Optional[str]:
     """Download any file from a URL and save it with a user-specified filename."""
     try:
-        # Use the provided filename or generate a fallback one
         if not filename:
             # Extract extension from URL if possible, else default to .bin
             ext = os.path.splitext(url.split('/')[-1])[1] or ".bin"
@@ -57,22 +77,17 @@ def DownloadFile(browser: AutoBrowser, url: str, save_dir: str, filename: str) -
         
         filepath = os.path.join(save_dir, filename)
         
-        # Configure download settings for Playwright
         browser.page.context.set_default_timeout(10000)  # 10 seconds
         
-        # Setup download event handler
         with browser.page.expect_download() as download_info:
             browser.page.goto(url)
         
         download = download_info.value
-        # Wait for the download to complete
         download_path = download.path()
         
-        # Move the file to the specified directory and filename
         final_path = os.path.join(save_dir, filename)
         os.rename(download_path, final_path)
         
-        # Check if file exists
         if os.path.exists(final_path):
             return final_path
         return None
@@ -95,9 +110,10 @@ def DocumentInfo(document_path: str, document_type: str, json_structure: str, de
         ext = document_type.lower()
         # PDF
         if ext == ".pdf":
-            import fitz  # PyMuPDF
-            with fitz.open(document_path) as doc:
-                content = "".join(page.get_text() for page in doc if page.get_text())
+            doc = pymupdf.open(document_path)
+            for page in doc:
+                content += page.get_text()
+            doc.close()
         # DOC/DOCX
         elif ext in (".doc", ".docx"):
             try:
@@ -106,7 +122,6 @@ def DocumentInfo(document_path: str, document_type: str, json_structure: str, de
                 content = "\n".join([para.text for para in doc.paragraphs if para.text.strip()])
             except ImportError:
                 import subprocess
-                # Use antiword for .doc if python-docx fails or is not installed
                 if ext == ".doc":
                     content = subprocess.check_output(['antiword', document_path]).decode('utf-8')
         # TXT
@@ -150,22 +165,27 @@ def DocumentInfo(document_path: str, document_type: str, json_structure: str, de
         prompt += f"\nContent to analyze:\n{content}"
         
         # Get AI response
-        response = PromptAI(prompt)
+        response = PromptAI(deepseek_chat_model, prompt)
         if not response:
             return CreateErrorResponse(document_path, "ai_no_response", "Failed to get AI response for tender analysis")
             
         # Validate the response is proper JSON
-        try:
-            json.loads(response)
-            return {"url": document_path, "info": response}
-        except json.JSONDecodeError:
-            return CreateErrorResponse(document_path, "invalid_json", 
-                                    "AI response was not in valid JSON format",
-                                    {"raw_response": response[:500]})
+        if isinstance(response, str):
+            try:
+                json.loads(response)
+                return {"url": document_path, "info": response}
+            except json.JSONDecodeError:
+                return CreateErrorResponse(document_path, "invalid_json", 
+                                        "AI response was not in valid JSON format",
+                                        {"raw_response": response[:500]})
+        else:
+            return CreateErrorResponse(document_path, "invalid_response", 
+                                     "AI response was not a string", 
+                                     {"raw_response": str(response)})
     except Exception as e:
         return CreateErrorResponse(document_path, "processing_error", f"Error analyzing tender: {str(e)}")
 
-def CreateErrorResponse(source: str, error_code: str, message: str, extra_data: Dict = None) -> Dict:
+def CreateErrorResponse(source: str, error_code: str, message: str, extra_data: Optional[Dict] = None) -> Dict:
     print(f"Warning: {error_code} for source {source} - {message}")
     
     error_response = {
