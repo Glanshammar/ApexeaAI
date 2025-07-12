@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=65.5.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ApexeaAI"
+version = "1.0.0"
+description = "A framework for AI functionality"
+authors = [{ name = "Andreas Johansson", email = "glanshammar70@gmail.com" }]
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["Agents*", "AI*", "Backend*", "Data*", "Logger*"]
