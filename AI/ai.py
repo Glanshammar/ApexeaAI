@@ -1,3 +1,4 @@
+from argparse import OPTIONAL
 import os
 import sys
 import time
@@ -23,6 +24,9 @@ deepseek_r1_model = "deepseek/deepseek-r1-0528:free"
 openrouter_api_keys = [
     os.getenv("OPENROUTER_KEY1"),
     os.getenv("OPENROUTER_KEY2"),
+    os.getenv("OPENROUTER_KEY3"),
+    os.getenv("OPENROUTER_KEY4"),
+    os.getenv("OPENROUTER_KEY5")
 ]
 
 api_calls = 0
@@ -95,24 +99,22 @@ def DownloadFile(browser: AutoBrowser, url: str, save_dir: str, filename: str) -
         print(f"Error downloading file: {str(e)}")
         return None
 
-def DocumentInfo(document_path: str, document_type: str, json_structure: str, details: str) -> Dict:
+def DocumentInfo(document_path: str, details: str, json_structure: Optional[str] = None) -> Dict:
     if not isinstance(document_path, str):
         return CreateErrorResponse(document_path, "invalid_path", "Document path not provided")
     if not os.path.exists(document_path):
         return CreateErrorResponse(document_path, "file_not_found", "Document file not found")
-    if not document_type in ('.pdf', '.doc', '.docx', '.txt', '.html', '.xml', '.json'):
-        return CreateErrorResponse(document_path, "invalid_file_type", "Document file type not provided")
     if not details:
         return CreateErrorResponse(document_path, "no_details", "No details provided")
     
     try:
         content = ""
-        ext = document_type.lower()
+        ext = document_path.split('.')[-1]
         # PDF
         if ext == ".pdf":
             doc = pymupdf.open(document_path)
             for page in doc:
-                content += page.get_text()
+                content += page.get_text()  # type: ignore
             doc.close()
         # DOC/DOCX
         elif ext in (".doc", ".docx"):
@@ -152,15 +154,15 @@ def DocumentInfo(document_path: str, document_type: str, json_structure: str, de
             return CreateErrorResponse(document_path, "no_content", "No content available to analyze")
         
         # Set up prompt based on source type
-        prompt = f"""Analyze this {document_type} file and extract the structured information about it.
+        prompt = f"""Analyze this {ext} file and extract the structured information about it.
         I want you to look for specific details in the file:
         {details}
 
-        You should translate the project description to English if it's not already in English and use the English version for the analysis.
+        You should respond in English even if the file is not in English.
         """
 
         if isinstance(json_structure, dict) and json_structure:
-            prompt += f"\nFormat your response exactly like this JSON structure:\n{json.dumps(json_structure)}"
+            prompt += f"\nFormat your response exactly like this JSON structure and nothing else:\n{json.dumps(json_structure)}"
         
         prompt += f"\nContent to analyze:\n{content}"
         

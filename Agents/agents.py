@@ -40,6 +40,7 @@ class Agent(Process):
         self.context = None
         self.command_socket = None
         self.status_socket = None
+        self.poller = None
     
     @property
     def status(self):
@@ -58,7 +59,7 @@ class Agent(Process):
     def __str__(self):
         return f"Agent ID: {self.agent_id} \nRunning: {self.running} \nStatus: {self.status.name}"
 
-    def Close(self):  
+    def close(self):
         if self.command_socket:  
             self.command_socket.close(linger=0)
         if self.status_socket:
@@ -81,68 +82,81 @@ class Agent(Process):
 
     def run(self):
         self.running = True
-        self.logger.info("Agent starting", extra={'agent_id': self.agent_id})
-
-        # Initialize ZMQ context and sockets in the child process
-        self.context = zmq.Context()
-        
-        # Setup command socket (bind)
-        self.command_socket = self.context.socket(zmq.REP) # Reply socket (to recieve commands)
-        self.command_socket.bind(f"tcp://*:{self.agent_id + COMMAND_PORT}")
-        self.logger.debug("Command socket bound", extra={
-            'agent_id': self.agent_id,
-            'port': self.agent_id + COMMAND_PORT
-        })
-
-        # Setup status socket (connect to manager's PUB)
-        self.status_socket = self.context.socket(zmq.PUB) # Publish socket (to give status updates)
-        self.status_socket.connect(f"tcp://localhost:{STATUS_PORT}")
-        self.logger.debug("Status socket connected", extra={
-            'agent_id': self.agent_id,
-            'port': STATUS_PORT
-        })
-
-        poller = zmq.Poller()
-        poller.register(self.command_socket, zmq.POLLIN)
-
-        # Send initial status
+        self.logger.info(f"Agent {self.agent_id} starting", extra={'agent_id': self.agent_id})
         self.send_status(f"Agent {self.agent_id} started")
 
+        # Initialize agent-specific data
+        if not self.initialize():
+            self.logger.error("Failed to initialize agent data", extra={'agent_id': self.agent_id})
+            self.send_status("Failed to initialize agent data")
+            return
+
+        # Initialize ZMQ context and sockets
+        self._setup_sockets()
+        
+        # Main agent loop
         while self.running:
-            # Poll for commands with timeout (500ms)
-            socks = dict(poller.poll(500))
-
-            if self.command_socket in socks:
-                try:
-                    command = self.command_socket.recv_string(zmq.NOBLOCK)
-                    self.logger.debug("Command received", extra={
-                        'agent_id': self.agent_id,
-                        'command': command
-                    })
-                    
-                    if command == "stop":
-                        self.send_status(f"Agent {self.agent_id} stopping")
-                        self.command_socket.send_string("Stopping")
-                        self.Stop()
-                    else:
-                        self.send_status(f"Agent {self.agent_id} received unknown command: {command}")
-                        self.command_socket.send_string(f"Unknown command: {command}")
-                except zmq.Again:
-                    # No command received
-                    pass
-                except Exception as e:
-                    self.logger.error("Error processing command", extra={
-                        'agent_id': self.agent_id,
-                        'error': str(e)
-                    })
-
-            # Send periodic status update
-            self.send_status(f"Agent {self.agent_id} is running")
-
+            self._process_commands()
             time.sleep(1)
-        self.Close()
+        
+        self.close()
 
-    def Stop(self):
+    def initialize(self):
+        """Override in subclasses to perform initialization"""
+        return True
+
+    def _setup_sockets(self):
+        self.context = zmq.Context()
+        
+        # Setup command socket
+        self.command_socket = self.context.socket(zmq.REP)
+        port = int(self.agent_id) + COMMAND_PORT
+        self.command_socket.bind(f"tcp://*:{port}")
+        
+        # Setup status socket
+        self.status_socket = self.context.socket(zmq.PUB)
+        self.status_socket.connect(f"tcp://localhost:{STATUS_PORT}")
+        
+        # Setup poller
+        self.poller = zmq.Poller()
+        self.poller.register(self.command_socket, zmq.POLLIN)
+        
+        self.logger.debug(f"Sockets initialized", extra={'agent_id': self.agent_id})
+        self.send_status(f"Agent {self.agent_id} sockets initialized")
+
+    def _process_commands(self):
+        if not self.poller or not self.command_socket:
+            return
+        socks = dict(self.poller.poll(500))
+        
+        if self.command_socket in socks:
+            try:
+                command = self.command_socket.recv_string(zmq.NOBLOCK)
+                self.handle_command(command)
+            except zmq.Again:
+                pass
+            except Exception as e:
+                self.logger.error(f"Error processing command: {str(e)}", extra={'agent_id': self.agent_id})
+
+    def handle_command(self, command):
+        """Process received commands. Override to add custom commands."""
+        if not self.command_socket:
+            self.logger.error("Command socket not initialized", extra={'agent_id': self.agent_id})
+            return
+        
+        if command == "stop":
+            self.command_socket.send_string("Stopping")
+            self.send_status(f"Agent {self.agent_id} stopping")
+            self.stop()
+        elif command == "test":
+            self.logger.debug("Received test command", extra={'agent_id': self.agent_id})
+            self.command_socket.send_string("Test received")
+            self.send_status("Test command received and acknowledged")
+        else:
+            self.command_socket.send_string(f"Unknown command: {command}")
+            self.send_status(f"Agent {self.agent_id} received unknown command: {command}")
+
+    def stop(self):
         self.running = False
         self.close()
 

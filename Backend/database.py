@@ -72,7 +72,7 @@ class FirestoreDB:
         """Get a document by its ID"""
         return self.read_document(collection_name, document_id)
         
-    def query(self, collection_name: str, query_filter: Dict[str, Any], limit: int = None) -> List[Tuple[str, Dict[str, Any]]]:
+    def query(self, collection_name: str, query_filter: Dict[str, Any], limit: Optional[int] = None) -> List[Tuple[str, Dict[str, Any]]]:
         """Query documents based on filter criteria"""
         try:
             from google.cloud.firestore_v1.base_query import FieldFilter
@@ -107,13 +107,12 @@ class FirestoreDB:
             return result
             
     def get_all(self, collection_name: str) -> List[Tuple[str, Dict[str, Any]]]:
-        """Get all documents in a collection"""
+
         collection_ref = self.db.collection(collection_name)
         docs = collection_ref.stream()
         return [(doc.id, doc.to_dict()) for doc in docs]
         
     def authenticate_user(self, collection_name: str, username: str, password: str) -> Optional[Tuple[str, Dict[str, Any]]]:
-        """Authenticate a user by username and password"""
         import bcrypt
         
         # Try with query first

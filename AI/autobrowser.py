@@ -82,7 +82,7 @@ class AutoBrowser:
             url = f'https://{url}'
         self.page.goto(url)
     
-    def FindElementXPATH(self, xpath: str):
+    def FindElementByXPath(self, xpath: str):
         return self.page.wait_for_selector(xpath)
     
     def FindElementByID(self, id_prefix: str, all_elements: bool = False):
@@ -101,7 +101,7 @@ class AutoBrowser:
         else:
             return self.page.query_selector_all(f"//*[text()='{text}']")
     
-    def FindHrefs(self) -> List[str]:
+    def FindPageLinks(self) -> List[str]:
         return self.page.evaluate("""() => {
             const links = Array.from(document.querySelectorAll('a'));
             return links.map(link => link.href).filter(href => href);
@@ -115,7 +115,10 @@ class AutoBrowser:
     
     def GetElementText(self, xpath: str) -> str:
         element = self.page.wait_for_selector(xpath)
-        return element.text_content() if element else ""
+        if not element:
+            return ""
+        text = element.text_content()
+        return text if text is not None else ""
     
     def TakeScreenshot(self, path: str) -> None:
         self.page.screenshot(path=path)
@@ -144,7 +147,7 @@ class AutoBrowser:
     def Reload(self) -> None:
         self.page.reload()
     
-    def CloseBrowser(self) -> None:
+    def Quit(self) -> None:
         self.browser.close()
         self.playwright.stop()
     

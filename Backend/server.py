@@ -212,7 +212,8 @@ def AgentCommand(params):
     try:
         agent_id = params.get('agent_id')
         command = params.get('command')
-        return master_agent.SendAgentCommand(agent_id, command)
+        manager = MasterAgent()
+        return manager.SendAgentCommand(agent_id, command)
     except Exception as e:
         return {
             'status': 'error',

@@ -15,7 +15,7 @@ sys.path.insert(0, current_dir)
 
 from flask import Flask, jsonify
 from flask_login import LoginManager, UserMixin
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 import secrets
 from datetime import datetime, timedelta
 from flask import session
@@ -73,12 +73,12 @@ def CreateApp(config=None):
 
     # Initialize database
     cred_path = f'{os.path.dirname(os.path.dirname(__file__))}/firebase.json'
-    app.db = Database(db_type='firestore', config=cred_path)
+    app.config['db'] = Database(db_type='firestore', config=cred_path)
 
     # --- Flask-Login Setup ---
     login_manager = LoginManager()
     login_manager.init_app(app)
-    login_manager.login_view = 'Login'
+    login_manager.login_view = 'Login'  # type: ignore
 
     USERS = 'Users'
 
@@ -102,7 +102,7 @@ def CreateApp(config=None):
 
         @classmethod
         def get(cls, user_id: str) -> Optional["User"]:           
-            data = current_app.db.get_by_id(USERS, user_id)
+            data = current_app.config['db'].get_by_id(USERS, user_id)
             if data:
                 return cls(
                     user_id=user_id,
@@ -115,7 +115,7 @@ def CreateApp(config=None):
 
         @classmethod
         def authenticate(cls, username: str, password: str) -> Optional["User"]:
-            result = current_app.db.authenticate_user(USERS, username, password)
+            result = current_app.config['db'].authenticate_user(USERS, username, password)
             
             if result:
                 user_id, user_data = result
@@ -133,7 +133,7 @@ def CreateApp(config=None):
         return User.get(user_id)
 
     # Attach User class to app for import elsewhere
-    app.User = User
+    app.config['User'] = User
 
     @app.before_request
     def enforce_absolute_session_timeout():
